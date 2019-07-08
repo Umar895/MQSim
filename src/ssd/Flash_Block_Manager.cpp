@@ -1,126 +1,140 @@
 
 #include "../nvm_chip/flash_memory/Physical_Page_Address.h"
 #include "Flash_Block_Manager.h"
+#include "Stats.h"
 
 namespace SSD_Components
 {
-	Flash_Block_Manager::Flash_Block_Manager(GC_and_WL_Unit_Base* gc_and_wl_unit, unsigned int MaxAllowedBlockEraseCount, unsigned int TotalStreamNo,
-		unsigned int ChannelCount, unsigned int ChipNoPerChannel, unsigned int DieNoPerChip, unsigned int PlaneNoPerDie,
-		unsigned int Block_no_per_plane, unsigned int Page_no_per_block)
-		: Flash_Block_Manager_Base(gc_and_wl_unit, MaxAllowedBlockEraseCount, TotalStreamNo),
-		channel_count(ChannelCount), chip_no_per_channel(ChipNoPerChannel), die_no_per_chip(DieNoPerChip), plane_no_per_die(PlaneNoPerDie),
-		block_no_per_plane(Block_no_per_plane), pages_no_per_block(Page_no_per_block)
+	Flash_Block_Manager::Flash_Block_Manager(GC_and_WL_Unit_Base* gc_and_wl_unit, unsigned int max_allowed_block_erase_count, unsigned int total_concurrent_streams_no,
+		unsigned int channel_count, unsigned int chip_no_per_channel, unsigned int die_no_per_chip, unsigned int plane_no_per_die,
+		unsigned int block_no_per_plane, unsigned int page_no_per_block)
+		: Flash_Block_Manager_Base(gc_and_wl_unit, max_allowed_block_erase_count, total_concurrent_streams_no, channel_count, chip_no_per_channel, die_no_per_chip,
+			plane_no_per_die, block_no_per_plane, page_no_per_block)
 	{
-		planeManager = new PlaneBookKeepingType***[channel_count];
-		for (unsigned int channelID = 0; channelID < channel_count; channelID++)
-		{
-			planeManager[channelID] = new PlaneBookKeepingType**[chip_no_per_channel];
-			for (unsigned int chipID = 0; chipID < chip_no_per_channel; chipID++)
-			{
-				planeManager[channelID][chipID] = new PlaneBookKeepingType*[die_no_per_chip];
-				for (unsigned int dieID = 0; dieID < die_no_per_chip; dieID++)
-				{
-					planeManager[channelID][chipID][dieID] = new PlaneBookKeepingType[plane_no_per_die];
-					for (unsigned int planeID = 0; planeID < plane_no_per_die; planeID++)
-					{
-						planeManager[channelID][chipID][dieID][planeID].TotalPagesCount = block_no_per_plane * pages_no_per_block;
-						planeManager[channelID][chipID][dieID][planeID].FreePagesCount = block_no_per_plane * pages_no_per_block;
-						planeManager[channelID][chipID][dieID][planeID].ValidPagesCount = 0;
-						planeManager[channelID][chipID][dieID][planeID].InvalidPagesCount = 0;
-						planeManager[channelID][chipID][dieID][planeID].BlockEraseCount = new unsigned int[max_allowed_block_erase_count];
-						planeManager[channelID][chipID][dieID][planeID].BlockEraseCount[0] = block_no_per_plane * pages_no_per_block; //At the start of the simulation all pages have zero erase count
-						for (unsigned int i = 1; i < max_allowed_block_erase_count; ++i)
-							planeManager[channelID][chipID][dieID][planeID].BlockEraseCount[i] = 0;
-						planeManager[channelID][chipID][dieID][planeID].Blocks = new BlockPoolSlotType[block_no_per_plane];
-						for (unsigned int blockID = 0; blockID < block_no_per_plane; blockID++)
-						{
-							planeManager[channelID][chipID][dieID][planeID].Blocks[blockID].BlockID = blockID;
-							planeManager[channelID][chipID][dieID][planeID].Blocks[blockID].CurrentPageWriteIndex = 0;
-							planeManager[channelID][chipID][dieID][planeID].Blocks[blockID].InvalidPageCount = 0;
-							planeManager[channelID][chipID][dieID][planeID].Blocks[blockID].EraseCount = 0;
-							planeManager[channelID][chipID][dieID][planeID].Blocks[blockID].HoldsMappingData = false;
-							BlockPoolSlotType::PageVectorSize = pages_no_per_block / 64;
-							planeManager[channelID][chipID][dieID][planeID].Blocks[blockID].InvalidPageVector = new uint64_t[BlockPoolSlotType::PageVectorSize];
-							for (unsigned int i = 0; i < BlockPoolSlotType::PageVectorSize; i++)
-								planeManager[channelID][chipID][dieID][planeID].Blocks[blockID].InvalidPageVector[i] = 0;
-							planeManager[channelID][chipID][dieID][planeID].FreeBlockPool.push_back(&planeManager[channelID][chipID][dieID][planeID].Blocks[blockID]);
-						}
-						planeManager[channelID][chipID][dieID][planeID].DataWF = new BlockPoolSlotType*[total_concurrent_streams_no];
-						planeManager[channelID][chipID][dieID][planeID].TranslationWF = new BlockPoolSlotType*[total_concurrent_streams_no];
-						for (unsigned int i = 0; i < total_concurrent_streams_no; i++)
-						{
-							planeManager[channelID][chipID][dieID][planeID].DataWF[i] = planeManager[channelID][chipID][dieID][planeID].FreeBlockPool.front();
-							planeManager[channelID][chipID][dieID][planeID].FreeBlockPool.pop_front();
-							planeManager[channelID][chipID][dieID][planeID].DataWF[i]->HoldsMappingData = false;
-							planeManager[channelID][chipID][dieID][planeID].TranslationWF[i] = planeManager[channelID][chipID][dieID][planeID].FreeBlockPool.front();
-							planeManager[channelID][chipID][dieID][planeID].TranslationWF[i]->HoldsMappingData = true;;
-							planeManager[channelID][chipID][dieID][planeID].FreeBlockPool.pop_front();
-						}
-					}
-				}
-			}
-		}
 	}
 
-	void Flash_Block_Manager::Allocate_block_and_page_in_plane_for_user_write(const stream_id_type streamID, NVM::FlashMemory::Physical_Page_Address& PageAddress)
+	Flash_Block_Manager::~Flash_Block_Manager()
 	{
-		PlaneBookKeepingType *plane = &planeManager[PageAddress.ChannelID][PageAddress.ChipID][PageAddress.DieID][PageAddress.PlaneID];
-		plane->FreePagesCount--;
-		plane->ValidPagesCount++;
-		PageAddress.BlockID = plane->DataWF[streamID]->BlockID;
-		PageAddress.PageID = plane->DataWF[streamID]->CurrentPageWriteIndex++;
-		if(plane->DataWF[streamID]->CurrentPageWriteIndex == pages_no_per_block)//The current write frontier block is written to the end
-		{
-			plane->DataWF[streamID] = plane->FreeBlockPool.front();//Assign a new write frontier block
-			plane->FreeBlockPool.pop_front();
-			plane->DataWF[streamID]->Stream_id = streamID;
-			plane->DataWF[streamID]->HoldsMappingData = false;
-			gc_and_wl_unit->CheckGCRequired((unsigned int)plane->FreeBlockPool.size(), PageAddress);
-		}
 	}
-	void Flash_Block_Manager::Allocate_block_and_page_in_plane_for_translation_write(const stream_id_type streamID, NVM::FlashMemory::Physical_Page_Address& PageAddress)
-	{
-		PlaneBookKeepingType *plane = &planeManager[PageAddress.ChannelID][PageAddress.ChipID][PageAddress.DieID][PageAddress.PlaneID];
-		PageAddress.BlockID = plane->TranslationWF[streamID]->BlockID;
-		PageAddress.PageID = plane->TranslationWF[streamID]->CurrentPageWriteIndex++;
-		if (plane->TranslationWF[streamID]->CurrentPageWriteIndex == pages_no_per_block)//The current write frontier block for translation pages is written to the end
-		{
-			plane->TranslationWF[streamID] = plane->FreeBlockPool.front();//Assign a new write frontier block
-			plane->FreeBlockPool.pop_front();
-			plane->TranslationWF[streamID]->Stream_id = streamID;
-			plane->TranslationWF[streamID]->HoldsMappingData = true;
-			gc_and_wl_unit->CheckGCRequired((unsigned int)plane->FreeBlockPool.size(), PageAddress);
-		}
-	}
-	void Flash_Block_Manager::Invalidate_page_in_block(const stream_id_type streamID, const NVM::FlashMemory::Physical_Page_Address& PageAddress)
-	{
-		planeManager[PageAddress.ChannelID][PageAddress.ChipID][PageAddress.DieID][PageAddress.PlaneID].InvalidPagesCount++;
-		planeManager[PageAddress.ChannelID][PageAddress.ChipID][PageAddress.DieID][PageAddress.PlaneID].Blocks[PageAddress.BlockID].InvalidPageCount++;
-		planeManager[PageAddress.ChannelID][PageAddress.ChipID][PageAddress.DieID][PageAddress.PlaneID].Blocks[PageAddress.BlockID].InvalidPageVector[PageAddress.PageID / 64]
-			|= ((uint64_t)0x1) << (PageAddress.PageID % 64);
-	}
-	void Flash_Block_Manager::Add_erased_block_to_pool(const NVM::FlashMemory::Physical_Page_Address& BloackAddress)
-	{
-		PlaneBookKeepingType *plane = &planeManager[BloackAddress.ChannelID][BloackAddress.ChipID][BloackAddress.DieID][BloackAddress.PlaneID];
-		BlockPoolSlotType* block = &(plane->Blocks[BloackAddress.BlockID]);
-		plane->BlockEraseCount++;
-		plane->FreePagesCount += block->InvalidPageCount;
-		plane->InvalidPagesCount -= block->InvalidPageCount;
 
-		block->CurrentPageWriteIndex = 0;
-		plane->BlockEraseCount[block->EraseCount]--;
-		block->EraseCount++;
-		plane->BlockEraseCount[block->EraseCount]++;
-		block->HoldsMappingData = false;
-		block->InvalidPageCount = 0;
-		for (unsigned int i = 0; i < BlockPoolSlotType::PageVectorSize; i++)
-			block->InvalidPageVector[i] = All_VALID_PAGE;
-		plane->FreeBlockPool.push_back(block);
+	void Flash_Block_Manager::Allocate_block_and_page_in_plane_for_user_write(const stream_id_type stream_id, NVM::FlashMemory::Physical_Page_Address& page_address)
+	{
+		PlaneBookKeepingType *plane_record = &plane_manager[page_address.ChannelID][page_address.ChipID][page_address.DieID][page_address.PlaneID];
+		plane_record->Valid_pages_count++;
+		plane_record->Free_pages_count--;		
+		page_address.BlockID = plane_record->Data_wf[stream_id]->BlockID;
+		page_address.PageID = plane_record->Data_wf[stream_id]->Current_page_write_index++;
+		program_transaction_issued(page_address);
+		if(plane_record->Data_wf[stream_id]->Current_page_write_index == pages_no_per_block)//The current write frontier block is written to the end
+		{
+			plane_record->Data_wf[stream_id] = plane_record->Get_a_free_block(stream_id, false);
+			gc_and_wl_unit->Check_gc_required(plane_record->Get_free_block_pool_size(), page_address);
+		}
+
+		plane_record->Check_bookkeeping_correctness(page_address);
 	}
+
+	void Flash_Block_Manager::Allocate_block_and_page_in_plane_for_gc_write(const stream_id_type stream_id, NVM::FlashMemory::Physical_Page_Address& page_address)
+	{
+		PlaneBookKeepingType *plane_record = &plane_manager[page_address.ChannelID][page_address.ChipID][page_address.DieID][page_address.PlaneID];
+		plane_record->Valid_pages_count++;
+		plane_record->Free_pages_count--;		
+		page_address.BlockID = plane_record->GC_wf[stream_id]->BlockID;
+		page_address.PageID = plane_record->GC_wf[stream_id]->Current_page_write_index++;
+		if (plane_record->GC_wf[stream_id]->Current_page_write_index == pages_no_per_block)//The current write frontier block is written to the end
+			plane_record->GC_wf[stream_id] = plane_record->Get_a_free_block(stream_id, false);//Assign a new write frontier block
+		
+		plane_record->Check_bookkeeping_correctness(page_address);
+	}
+	
+	void Flash_Block_Manager::Allocate_Pages_in_block_and_invalidate_remaining_for_preconditioning(const stream_id_type stream_id, const NVM::FlashMemory::Physical_Page_Address& plane_address, std::vector<NVM::FlashMemory::Physical_Page_Address>& page_addresses)
+	{
+		if(page_addresses.size() > pages_no_per_block)
+			PRINT_ERROR("Error while precondition a physical block: the size of the address list is larger than the pages_no_per_block!")
+			
+		PlaneBookKeepingType *plane_record = &plane_manager[plane_address.ChannelID][plane_address.ChipID][plane_address.DieID][plane_address.PlaneID];
+		if (plane_record->Data_wf[stream_id]->Current_page_write_index > 0)
+			PRINT_ERROR("Illegal operation: the Allocate_Pages_in_block_and_invalidate_remaining_for_preconditioning function should be executed for an erased block!")
+
+		//Assign physical addresses
+		for (int i = 0; i < page_addresses.size(); i++)
+		{
+			plane_record->Valid_pages_count++;
+			plane_record->Free_pages_count--;
+			page_addresses[i].BlockID = plane_record->Data_wf[stream_id]->BlockID;
+			page_addresses[i].PageID = plane_record->Data_wf[stream_id]->Current_page_write_index++;
+			plane_record->Check_bookkeeping_correctness(page_addresses[i]);
+		}
+
+		//Invalidate the remaining pages in the block
+		NVM::FlashMemory::Physical_Page_Address target_address(plane_address);
+		while (plane_record->Data_wf[stream_id]->Current_page_write_index < pages_no_per_block)
+		{
+			plane_record->Free_pages_count--;
+			target_address.BlockID = plane_record->Data_wf[stream_id]->BlockID;
+			target_address.PageID = plane_record->Data_wf[stream_id]->Current_page_write_index++;
+			Invalidate_page_in_block_for_preconditioning(stream_id, target_address);
+			plane_record->Check_bookkeeping_correctness(plane_address);
+		}
+
+		//Update the write frontier
+		plane_record->Data_wf[stream_id] = plane_record->Get_a_free_block(stream_id, false);
+	}
+
+	void Flash_Block_Manager::Allocate_block_and_page_in_plane_for_translation_write(const stream_id_type streamID, NVM::FlashMemory::Physical_Page_Address& page_address, bool is_for_gc)
+	{
+		PlaneBookKeepingType *plane_record = &plane_manager[page_address.ChannelID][page_address.ChipID][page_address.DieID][page_address.PlaneID];
+		plane_record->Valid_pages_count++;
+		plane_record->Free_pages_count--;
+		page_address.BlockID = plane_record->Translation_wf[streamID]->BlockID;
+		page_address.PageID = plane_record->Translation_wf[streamID]->Current_page_write_index++;
+		program_transaction_issued(page_address);
+		if (plane_record->Translation_wf[streamID]->Current_page_write_index == pages_no_per_block)//The current write frontier block for translation pages is written to the end
+		{
+			plane_record->Translation_wf[streamID] = plane_record->Get_a_free_block(streamID, true);//Assign a new write frontier block
+			if (!is_for_gc)
+				gc_and_wl_unit->Check_gc_required(plane_record->Get_free_block_pool_size(), page_address);
+		}
+		plane_record->Check_bookkeeping_correctness(page_address);
+	}
+
+	inline void Flash_Block_Manager::Invalidate_page_in_block(const stream_id_type stream_id, const NVM::FlashMemory::Physical_Page_Address& page_address)
+	{
+		PlaneBookKeepingType* plane_record = &plane_manager[page_address.ChannelID][page_address.ChipID][page_address.DieID][page_address.PlaneID];
+		plane_record->Invalid_pages_count++;
+		plane_record->Valid_pages_count--;
+		if (plane_record->Blocks[page_address.BlockID].Stream_id != stream_id)
+			PRINT_ERROR("Inconsistent status in the Invalidate_page_in_block function! The accessed block is not allocated to stream " << stream_id)
+		plane_record->Blocks[page_address.BlockID].Invalid_page_count++;
+		plane_record->Blocks[page_address.BlockID].Invalid_page_bitmap[page_address.PageID / 64] |= ((uint64_t)0x1) << (page_address.PageID % 64);
+	}
+
+	inline void Flash_Block_Manager::Invalidate_page_in_block_for_preconditioning(const stream_id_type stream_id, const NVM::FlashMemory::Physical_Page_Address& page_address)
+	{
+		PlaneBookKeepingType* plane_record = &plane_manager[page_address.ChannelID][page_address.ChipID][page_address.DieID][page_address.PlaneID];
+		plane_record->Invalid_pages_count++;
+		if (plane_record->Blocks[page_address.BlockID].Stream_id != stream_id)
+			PRINT_ERROR("Inconsistent status in the Invalidate_page_in_block function! The accessed block is not allocated to stream " << stream_id)
+			plane_record->Blocks[page_address.BlockID].Invalid_page_count++;
+		plane_record->Blocks[page_address.BlockID].Invalid_page_bitmap[page_address.PageID / 64] |= ((uint64_t)0x1) << (page_address.PageID % 64);
+	}
+
+	void Flash_Block_Manager::Add_erased_block_to_pool(const NVM::FlashMemory::Physical_Page_Address& block_address)
+	{
+		PlaneBookKeepingType *plane_record = &plane_manager[block_address.ChannelID][block_address.ChipID][block_address.DieID][block_address.PlaneID];
+		Block_Pool_Slot_Type* block = &(plane_record->Blocks[block_address.BlockID]);
+		plane_record->Free_pages_count += block->Invalid_page_count;
+		plane_record->Invalid_pages_count -= block->Invalid_page_count;
+
+		Stats::Block_erase_histogram[block_address.ChannelID][block_address.ChipID][block_address.DieID][block_address.PlaneID][block->Erase_count]--;
+		block->Erase();
+		Stats::Block_erase_histogram[block_address.ChannelID][block_address.ChipID][block_address.DieID][block_address.PlaneID][block->Erase_count]++;
+		plane_record->Add_to_free_block_pool(block, gc_and_wl_unit->Use_dynamic_wearleveling());
+		plane_record->Check_bookkeeping_correctness(block_address);
+	}
+
 	inline unsigned int Flash_Block_Manager::Get_pool_size(const NVM::FlashMemory::Physical_Page_Address& plane_address)
 	{
-		return (unsigned int) planeManager[plane_address.ChannelID][plane_address.ChipID][plane_address.DieID][plane_address.PlaneID].FreeBlockPool.size();
+		return (unsigned int) plane_manager[plane_address.ChannelID][plane_address.ChipID][plane_address.DieID][plane_address.PlaneID].Free_block_pool.size();
 	}
-	void Flash_Block_Manager::GetWearlevelingBlocks(BlockPoolSlotType*& hotBlock, BlockPoolSlotType*& coldBlock)
-	{}
 }

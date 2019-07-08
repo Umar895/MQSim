@@ -3,8 +3,9 @@
 
 #include <string>
 #include <list>
-#include "SSDTypes.h"
+#include "SSD_Defs.h"
 #include "../sim/Sim_Defs.h"
+#include "Host_Interface_Defs.h"
 #include "NVM_Transaction.h"
 
 namespace SSD_Components
@@ -15,8 +16,9 @@ namespace SSD_Components
 	{
 	public:
 		User_Request();
-		io_request_type RequestID;
-		LSA_type Start_LBA;
+		IO_Flow_Priority_Class Priority_class;
+		io_request_id_type ID;
+		LHA_type Start_LBA;
 
 		sim_time_type STAT_InitiationTime;
 		sim_time_type STAT_ResponseTime;

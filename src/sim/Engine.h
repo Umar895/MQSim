@@ -24,10 +24,12 @@ namespace MQSimEngine {
 		void Ignore_sim_event(Sim_Event*);
 		void Reset();
 		void AddObject(Sim_Object* obj);
+		Sim_Object* GetObject(sim_object_id_type object_id);
 		void RemoveObject(Sim_Object* obj);
 		void Start_simulation();
 		void Stop_simulation();
 		bool Has_started();
+		bool Is_integrated_execution_mode();
 	private:
 		sim_time_type _sim_time;
 		EventTree* _EventList;
@@ -39,13 +41,4 @@ namespace MQSimEngine {
 }
 
 #define Simulator MQSimEngine::Engine::Instance()
-#define CurrentTimeStamp Simulator->Time()
-#define PRINT_ERROR(MSG) {\
-							std::cerr << MSG << std::endl; \
-							std::cin.get();\
-							exit(1);\
-						 }
-#define DEBUG(M) //std::cout<<M<<std::endl;
-//#define //DEBUG2(M) //std::cout<<M<<std::endl;
-#define SIM_TIME_TO_MICROSECONDS_COEFF 1000
 #endif // !ENGINE_H

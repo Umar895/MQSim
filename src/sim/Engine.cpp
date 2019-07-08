@@ -1,4 +1,6 @@
+#include <stdexcept>
 #include "Engine.h"
+#include "../utils/Logical_Address_Partitioning_Unit.h"
 
 namespace MQSimEngine
 {
@@ -14,9 +16,11 @@ namespace MQSimEngine
 	void Engine::Reset()
 	{
 		_EventList->Clear();
+		_ObjectList.clear();
 		_sim_time = 0;
 		stop = false;
 		started = false;
+		Utils::Logical_Address_Partitioning_Unit::Reset();
 	}
 
 
@@ -24,22 +28,29 @@ namespace MQSimEngine
 	void Engine::AddObject(Sim_Object* obj)
 	{
 		if (_ObjectList.find(obj->ID()) != _ObjectList.end())
-			throw "Duplicate object key: " + obj->ID();
+			throw std::invalid_argument("Duplicate object key: " + obj->ID());
 		_ObjectList.insert(std::pair<sim_object_id_type, Sim_Object*>(obj->ID(), obj));
+	}
+	
+	Sim_Object* Engine::GetObject(sim_object_id_type object_id)
+	{
+		auto itr = _ObjectList.find(object_id);
+		if (itr == _ObjectList.end())
+			return NULL;
+		return (*itr).second;
 	}
 
 	void Engine::RemoveObject(Sim_Object* obj)
 	{
 		std::unordered_map<sim_object_id_type, Sim_Object*>::iterator it = _ObjectList.find(obj->ID());
 		if (it == _ObjectList.end())
-			throw "Removing an unregistered object.";
+			throw std::invalid_argument("Removing an unregistered object.");
 		_ObjectList.erase(it);
 	}
 
 	/// This is the main method of simulator which starts simulation process.
 	void Engine::Start_simulation()
 	{
-		Reset();
 		started = true;
 
 		for(std::unordered_map<sim_object_id_type, Sim_Object*>::iterator obj = _ObjectList.begin();
@@ -113,5 +124,10 @@ namespace MQSimEngine
 	void Engine::Ignore_sim_event(Sim_Event* ev)
 	{
 		ev->Ignore = true;
+	}
+
+	bool Engine::Is_integrated_execution_mode()
+	{
+		return false;
 	}
 }

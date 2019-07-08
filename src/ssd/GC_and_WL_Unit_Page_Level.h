@@ -3,42 +3,31 @@
 
 #include "GC_and_WL_Unit_Base.h"
 #include "NVM_PHY_ONFI.h"
+#include "../utils/RandomGenerator.h"
+#include <queue>
+
 
 namespace SSD_Components
 {
-	enum class GC_Block_Selection_Policy_Type {
-		GREEDY,
-		RGA,						/*The randomized-greedy algorithm described in: "B. Van Houdt, A Mean Field Model 
-									for a Class of Garbage Collection Algorithms in Flash - based Solid State Drives,
-									SIGMETRICS, 2013" and "Stochastic Modeling of Large-Scale Solid-State Storage
-									Systems: Analysis, Design Tradeoffs and Optimization, SIGMETRICS, 2013".*/
-		RANDOM, RANDOM_P, RANDOM_PP,/*The RANDOM, RANDOM+, and RANDOM++ algorithms described in: "B. Van Houdt, A Mean
-									Field Model  for a Class of Garbage Collection Algorithms in Flash - based Solid
-									State Drives, SIGMETRICS, 2013".*/
-		FIFO						/*The FIFO algortihm described in "P. Desnoyers, "Analytic  Modeling  of  SSD Write
-									Performance, SYSTOR, 2012".*/
-		};
 	class GC_and_WL_Unit_Page_Level : public GC_and_WL_Unit_Base
 	{
 	public:
-		GC_and_WL_Unit_Page_Level(FTL* ftl, Flash_Block_Manager_Base* BlockManager, double GCThreshold, 
-			GC_Block_Selection_Policy_Type BlockSelectionPolicy,
-			bool PreemptibleGCEnabled, double GCHardThreshold,
-			unsigned int ChannelCount, unsigned int ChipNoPerChannel, unsigned int DieNoPerChip, unsigned int PlaneNoPerDie,
-			unsigned int Block_no_per_plane, unsigned int Page_no_per_block, unsigned int SectorsPerPage);
-		void Setup_triggers();
+		GC_and_WL_Unit_Page_Level(const sim_object_id_type& id,
+			Address_Mapping_Unit_Base* address_mapping_unit, Flash_Block_Manager_Base* block_manager, TSU_Base* tsu, NVM_PHY_ONFI* flash_controller,
+			GC_Block_Selection_Policy_Type block_selection_policy, double gc_threshold, bool preemptible_gc_enabled, double gc_hard_threshold,
+			unsigned int channel_count, unsigned int chip_no_per_channel, unsigned int die_no_per_chip, unsigned int plane_no_per_die,
+			unsigned int block_no_per_plane, unsigned int page_no_per_block, unsigned int sectors_per_page, 
+			bool use_copyback, double rho, unsigned int max_ongoing_gc_reqs_per_plane = 10, 
+			bool dynamic_wearleveling_enabled = true, bool static_wearleveling_enabled = true, unsigned int static_wearleveling_threshold = 100, int seed = 432);
 
 		/*This function is used for implementing preemptible GC execution. If for a flash chip the free block
 		* pool becomes close to empty, then the GC requests for that flash chip should be prioritized and
 		* GC should go on in non-preemptible mode.*/
-		bool GC_is_in_urgent_mode(const NVM::FlashMemory::Chip*);
+		bool GC_is_in_urgent_mode(const NVM::FlashMemory::Flash_Chip*);
 
-		void CheckGCRequired(const unsigned int BlockPoolSize, const NVM::FlashMemory::Physical_Page_Address& planeAddress);
-		void CheckWLRequired(const double staticWLFactor, const NVM::FlashMemory::Physical_Page_Address planeAddress);
+		void Check_gc_required(const unsigned int free_block_pool_size, const NVM::FlashMemory::Physical_Page_Address& plane_address);
 	private:
-		GC_Block_Selection_Policy_Type blockSelectionPolicy;
 		NVM_PHY_ONFI * flash_controller;
-		static void handle_transaction_serviced_signal_from_PHY(NVM_Transaction_Flash* transaction);
 	};
 }
 #endif // !GC_AND_WL_UNIT_PAGE_LEVEL_H

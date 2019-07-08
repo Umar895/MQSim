@@ -8,7 +8,7 @@
 #include "../nvm_chip/flash_memory/Flash_Command.h"
 #include "NVM_PHY_ONFI.h"
 #include "ONFI_Channel_NVDDR2.h"
-#include "FlashTransactionQueue.h"
+#include "Flash_Transaction_Queue.h"
 
 namespace SSD_Components
 {
@@ -34,14 +34,14 @@ namespace SSD_Components
 		NVM_Transaction_Flash* ActiveTransfer; //The current transaction 
 		bool Free;
 		bool Suspended;
-		sim_time_type ExpectedFinishTime;
+		sim_time_type Expected_finish_time;
 		sim_time_type RemainingExecTime;
 		sim_time_type DieInterleavedTime;//If the command transfer is done in die-interleaved mode, the transfer time is recorded in this temporary variable
 
 		void PrepareSuspend()
 		{
 			SuspendedCommand = ActiveCommand;
-			RemainingExecTime = ExpectedFinishTime - Simulator->Time();
+			RemainingExecTime = Expected_finish_time - Simulator->Time();
 			SuspendedTransactions.insert(SuspendedTransactions.begin(), ActiveTransactions.begin(), ActiveTransactions.end());
 			Suspended = true;
 			ActiveCommand = NULL;
@@ -51,7 +51,7 @@ namespace SSD_Components
 		void PrepareResume()
 		{
 			ActiveCommand = SuspendedCommand;
-			ExpectedFinishTime = Simulator->Time() + RemainingExecTime;
+			Expected_finish_time = Simulator->Time() + RemainingExecTime;
 			ActiveTransactions.insert(ActiveTransactions.begin(), SuspendedTransactions.begin(), SuspendedTransactions.end());
 			Suspended = false;
 			SuspendedCommand = NULL;
@@ -87,28 +87,35 @@ namespace SSD_Components
 	{
 	public:
 		NVM_PHY_ONFI_NVDDR2(const sim_object_id_type& id, ONFI_Channel_NVDDR2** channels,
-			unsigned int ChannelCount, unsigned int ChipNoPerChannel, unsigned int DieNoPerChip, unsigned int PlaneNoPerDie);
+			unsigned int ChannelCount, unsigned int chip_no_per_channel, unsigned int DieNoPerChip, unsigned int PlaneNoPerDie);
 		void Setup_triggers();
 		void Validate_simulation_config();
 		void Start_simulation();
 
 		void Send_command_to_chip(std::list<NVM_Transaction_Flash*>& transactionList);
+		void Change_flash_page_status_for_preconditioning(const NVM::FlashMemory::Physical_Page_Address& page_address, const LPA_type lpa);
 		void Execute_simulator_event(MQSimEngine::Sim_Event*);
-		BusChannelStatus GetChannelStatus(flash_channel_ID_type channelID);
-		NVM::FlashMemory::Chip* GetChip(flash_channel_ID_type channelID, flash_chip_ID_type chipID);
-		bool HasSuspendedCommand(NVM::FlashMemory::Chip* chip);
-		ChipStatus GetChipStatus(NVM::FlashMemory::Chip* chip);
-		sim_time_type ExpectedFinishTime(NVM::FlashMemory::Chip* chip);
+		BusChannelStatus Get_channel_status(flash_channel_ID_type channelID);
+		NVM::FlashMemory::Flash_Chip* Get_chip(flash_channel_ID_type channel_id, flash_chip_ID_type chip_id);
+		LPA_type Get_metadata(flash_channel_ID_type channe_id, flash_chip_ID_type chip_id, flash_die_ID_type die_id, flash_plane_ID_type plane_id, flash_block_ID_type block_id, flash_page_ID_type page_id);//A simplification to decrease the complexity of GC execution! The GC unit may need to know the metadata of a page to decide if a page is valid or invalid. 
+		bool HasSuspendedCommand(NVM::FlashMemory::Flash_Chip* chip);
+		ChipStatus GetChipStatus(NVM::FlashMemory::Flash_Chip* chip);
+		sim_time_type Expected_finish_time(NVM::FlashMemory::Flash_Chip* chip);
+		sim_time_type Expected_finish_time(NVM_Transaction_Flash* transaction);
+		sim_time_type Expected_transfer_time(NVM_Transaction_Flash* transaction);
+		NVM_Transaction_Flash* Is_chip_busy_with_stream(NVM_Transaction_Flash* transaction);
+		bool Is_chip_busy(NVM_Transaction_Flash* transaction);
+		void Change_memory_status_preconditioning(const NVM::NVM_Memory_Address* address, const void* status_info);
 	private:
 		void transfer_read_data_from_chip(ChipBookKeepingEntry* chipBKE, DieBookKeepingEntry* dieBKE, NVM_Transaction_Flash* tr);
-		void perform_interleaved_cmd_data_transfer(NVM::FlashMemory::Chip* chip, DieBookKeepingEntry* bookKeepingEntry);
-		void send_resume_command_to_chip(NVM::FlashMemory::Chip* chip, ChipBookKeepingEntry* chipBKE);
-		static void handle_ready_signal_from_chip(NVM::FlashMemory::Chip* chip, NVM::FlashMemory::Flash_Command* command);
+		void perform_interleaved_cmd_data_transfer(NVM::FlashMemory::Flash_Chip* chip, DieBookKeepingEntry* bookKeepingEntry);
+		void send_resume_command_to_chip(NVM::FlashMemory::Flash_Chip* chip, ChipBookKeepingEntry* chipBKE);
+		static void handle_ready_signal_from_chip(NVM::FlashMemory::Flash_Chip* chip, NVM::FlashMemory::Flash_Command* command);
 
-		static NVM_PHY_ONFI_NVDDR2* _myInstance;
-		ONFI_Channel_NVDDR2** _Channels;
+		static NVM_PHY_ONFI_NVDDR2* _my_instance;
+		ONFI_Channel_NVDDR2** channels;
 		ChipBookKeepingEntry** bookKeepingTable;
-		FlashTransactionQueue *WaitingReadTX, *WaitingGCRead_TX, *WaitingMappingRead_TX;
+		Flash_Transaction_Queue *WaitingReadTX, *WaitingGCRead_TX, *WaitingMappingRead_TX;
 		std::list<DieBookKeepingEntry*> *WaitingCopybackWrites;
 	};
 }
